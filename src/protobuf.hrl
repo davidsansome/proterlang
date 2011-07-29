@@ -11,5 +11,6 @@
   number,
   label = required,
   default_value = undefined,
-  nested_type = undefined
+  nested_type = undefined,
+  enum_functions = undefined
 }).

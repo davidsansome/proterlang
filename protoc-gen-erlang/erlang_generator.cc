@@ -140,7 +140,7 @@ void ErlangGenerator::GenerateErlExports(const FileDescriptor* file, Printer* er
 }
 
 void ErlangGenerator::GenerateErlExports(const Descriptor* message, Printer* erl) const {
-  erl->Print("-export([decode_$name$/1]).\n",
+  erl->Print("-export([decode_$name$/1, encode_$name$/1]).\n",
              "name", ErlangThingName(message));
 
   // Embedded types
@@ -241,6 +241,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     variables["field_number"] = SimpleItoa(field->number());
     variables["label_atom"] = FieldLabelAtom(field);
     variables["nested_type"] = FieldNestedTypeTuple(field);
+    variables["enum_functions"] = FieldEnumFunctionsTuple(field);
 
     hrl->Print(variables,
         "    #field_definition{\n"
@@ -248,7 +249,8 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
         "      type = '$field_type$',\n"
         "      number = $field_number$,\n"
         "      label = '$label_atom$',\n"
-        "      nested_type = $nested_type$\n"
+        "      nested_type = $nested_type$,\n"
+        "      enum_functions = $enum_functions$\n"
         "    }");
   }
 
@@ -351,10 +353,22 @@ string ErlangGenerator::FieldLabelAtom(const FieldDescriptor* field) const {
 
 string ErlangGenerator::FieldNestedTypeTuple(const FieldDescriptor* field) const {
   if (field->type() != FieldDescriptor::TYPE_MESSAGE) {
-    return "'undefined'";
+    return "undefined";
   }
 
   string module   = ErlangFilename(field->message_type()->file());
   string function = "decode_" + ErlangThingName(field->message_type());
   return "{'" + module + "', '" + function + "'}";
+}
+
+string ErlangGenerator::FieldEnumFunctionsTuple(const FieldDescriptor* field) const {
+  if (field->type() != FieldDescriptor::TYPE_ENUM) {
+    return "undefined";
+  }
+
+  string module     = ErlangFilename(field->containing_type()->file());
+  string name_func  = ErlangThingName(field->enum_type()) + "_name";
+  string value_func = ErlangThingName(field->enum_type()) + "_value";
+
+  return "{'" + module + "', '" + name_func + "', '" + value_func + "'}";
 }

@@ -52,6 +52,7 @@ private:
   string FieldTypeAtom(const FieldDescriptor* field) const;
   string FieldLabelAtom(const FieldDescriptor* field) const;
   string FieldNestedTypeTuple(const FieldDescriptor* field) const;
+  string FieldEnumFunctionsTuple(const FieldDescriptor* field) const;
 };
 
 #endif // GENERATOR_H

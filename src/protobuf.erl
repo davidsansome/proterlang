@@ -141,29 +141,35 @@ decode_item_value(Value, FieldNumber, MessageDefinition) ->
     false ->
       % We don't know about this field number, just leave the value alone.
       Value;
-    #field_definition{type = Type} ->
-      decode_item_value(Value, Type)
+    Definition ->
+      decode_item_value(Value, Definition)
   end.
 
-decode_item_value(Value, int32) ->
-  decode_item_value(Value, int64);
-decode_item_value(Value, int64) ->
+decode_item_value(Value, #field_definition{type = int32} = Def) ->
+  decode_item_value(Value, Def#field_definition{type = int64});
+decode_item_value(Value, #field_definition{type = int64}) ->
   <<Ret:64/signed-integer>> = <<Value:64>>,
   Ret;
-decode_item_value(Value, uint32) ->
-  decode_item_value(Value, uint64);
-decode_item_value(Value, uint64) ->
+decode_item_value(Value, #field_definition{type = uint32} = Def) ->
+  decode_item_value(Value, Def#field_definition{type = uint64});
+decode_item_value(Value, #field_definition{type = uint64}) ->
   Value;
-decode_item_value(Value, sint32) ->
-  decode_item_value(Value, sint64);
-decode_item_value(Value, sint64) when Value band 1 == 0 ->
+decode_item_value(Value, #field_definition{type = sint32} = Def) ->
+  decode_item_value(Value, Def#field_definition{type = sint64});
+decode_item_value(Value, #field_definition{type = sint64}) when Value band 1 == 0 ->
   Value bsr 1;
-decode_item_value(Value, sint64) when Value band 1 == 1 ->
+decode_item_value(Value, #field_definition{type = sint64}) when Value band 1 == 1 ->
   - ((Value + 1) bsr 1);
-decode_item_value(0, bool) ->
+decode_item_value(0, #field_definition{type = bool}) ->
   false;
-decode_item_value(_, bool) ->
+decode_item_value(_, #field_definition{type = bool}) ->
   true;
+decode_item_value(Value, #field_definition{type = message,
+                                           nested_type = {Module, Function}}) ->
+  Module:Function(Value);
+decode_item_value(Value, #field_definition{type = enum,
+                                           enum_functions = {Module, V2N, _}}) ->
+  Module:V2N(Value);
 decode_item_value(Value, _) ->
   Value.
 
@@ -217,14 +223,6 @@ decode_file(Filename, Module, Function) ->
   end.
 
 
-% If the field definition says this value is a nested type, decode the value
-% into a record of the nested type.  Otherwise just return the value as is.
-decode_nested_type(Value, #field_definition{nested_type = undefined}) ->
-  Value;
-decode_nested_type(Value, #field_definition{nested_type = {Module, Function}}) ->
-  Module:Function(Value).
-
-
 % Finds a field with the given field number in the list of decoded items.
 % If the field wasn't found in the list if items and the definition says it was
 % required, raises an exception, otherwise returns the default field value.
@@ -237,26 +235,31 @@ find_field(Items, FieldNumber, MessageDefinition) ->
   Item = lists:keyfind(FieldNumber, 1, Items),
   case Item of
     false ->
-      % The value wasn't found in the message - raise an exception if it was
-      % required, otherwise use the default value.
+      % The value wasn't found in the message - use the default value.
       case Definition#field_definition.label of
-        required -> undefined; % TODO: log something?
+        required -> undefined;
         _        -> Definition#field_definition.default_value
       end;
 
     {FieldNumber, Value} ->
-      decode_nested_type(Value, Definition)
+      Value
   end.
 
 
-% Gets the atom corresponding to an integer enum value.
+% Gets the atom corresponding to an integer enum value, or 'unknown' if the
+% value wasn't valid.
 enum_name(Value, EnumValues) when is_integer(Value) ->
-  {Name, Value} = lists:keyfind(Value, 2, EnumValues),
-  Name.
+  case lists:keyfind(Value, 2, EnumValues) of
+    {Name, Value} -> Name;
+    false         -> unknown
+  end.
 
 
-% Gets the integer value corresponding to an enum name atom.
+% Gets the integer value corresponding to an enum name atom, or 0 if the name
+% wasn't valid.
 enum_value(Name, EnumValues) when is_atom(Name) ->
-  {Name, Value} = lists:keyfind(Name, 1, EnumValues),
-  Value.
+  case lists:keyfind(Name, 1, EnumValues) of
+    {Name, Value} -> Value;
+    false         -> 0
+  end.
 
