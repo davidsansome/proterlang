@@ -96,10 +96,13 @@ find_field(Items, FieldNumber, MessageDefinition) ->
   end.
 
 
+% Gets the atom corresponding to an integer enum value.
 enum_name(Value, EnumValues) when is_integer(Value) ->
   {Name, Value} = lists:keyfind(Value, 2, EnumValues),
   Name.
 
+
+% Gets the integer value corresponding to an enum name atom.
 enum_value(Name, EnumValues) when is_atom(Name) ->
   {Name, Value} = lists:keyfind(Name, 1, EnumValues),
   Value.
