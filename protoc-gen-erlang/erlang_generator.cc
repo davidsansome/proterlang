@@ -218,7 +218,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
       hrl->Print(",\n");
     }
     variables["field_name"] = message->field(i)->name();
-    hrl->Print(variables, "  $field_name$");
+    hrl->Print(variables, "  '$field_name$'");
   }
 
   // Finish the record type
@@ -292,7 +292,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     variables["field_number"] = SimpleItoa(field->number());
 
     erl->Print(variables,
-        "    $field_name$ = protobuf:find_field("
+        "    '$field_name$' = protobuf:find_field("
                  "Items, $field_number$, ?$messagename_upper$_DEFINITION)"
         );
   }
