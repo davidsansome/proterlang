@@ -4,7 +4,7 @@ add_executable(protoc-gen-erlang
 )
 
 target_link_libraries(protoc-gen-erlang
-  protobuf
-  protoc
+  ${PROTOC_LIBRARY}
+  ${PROTOBUF_LIBRARY}
 )
 
