@@ -3,21 +3,48 @@
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/io/printer.h>
 #include <google/protobuf/io/zero_copy_stream.h>
-#include <google/protobuf/compiler/cpp/cpp_helpers.h>
-#include <google/protobuf/stubs/strutil.h>
 
-namespace google {
-namespace protobuf {
-namespace compiler {
-namespace erlang {
+#include <sstream>
+
+using std::string;
+
+using namespace google::protobuf;
 
 namespace {
 
+inline void StripSuffix(const string& suffix, string* s) {
+  const int pos = s->rfind(suffix);
+  if (pos != string::npos && pos == s->size() - suffix.size()) {
+    s->resize(pos);
+  }
+}
+
+inline void LowerString(string* s) {
+  string::iterator end = s->end();
+  for (string::iterator i = s->begin(); i != end; ++i) {
+    // tolower() changes based on locale.  We don't want this!
+    if ('A' <= *i && *i <= 'Z') *i += 'a' - 'A';
+  }
+}
+
+inline void UpperString(string* s) {
+  string::iterator end = s->end();
+  for (string::iterator i = s->begin(); i != end; ++i) {
+    // toupper() changes based on locale.  We don't want this!
+    if ('a' <= *i && *i <= 'z') *i += 'A' - 'a';
+  }
+}
+
+inline string SimpleItoa(int value) {
+  std::stringstream out;
+  out << value;
+  return out.str();
+}
+
 // Returns the Erlang module base name expected for a given .proto filename.
 string ModuleBaseName(const string& filename) {
-  string basename = cpp::StripProto(filename);
-  StripString(&basename, "-", '_');
-  StripString(&basename, "/", '_');
+  string basename = filename;
+  StripSuffix(".proto", &basename);
   return basename;
 }
 
@@ -30,13 +57,13 @@ string MessageName(const string& module, const Descriptor* message) {
 } // namespace
 
 
-Generator::Generator() {
+ErlangGenerator::ErlangGenerator() {
 }
 
-Generator::~Generator() {
+ErlangGenerator::~ErlangGenerator() {
 }
 
-bool Generator::Generate(const FileDescriptor* file,
+bool ErlangGenerator::Generate(const FileDescriptor* file,
                          const string& parameter,
                          GeneratorContext* generator_context,
                          string* error) const {
@@ -53,7 +80,7 @@ bool Generator::Generate(const FileDescriptor* file,
   return true;
 }
 
-void Generator::GenerateMessageHeader(const string& messagename,
+void ErlangGenerator::GenerateMessageHeader(const string& messagename,
                                       const Descriptor* message,
                                       GeneratorContext* context) const {
   string filename = messagename + ".hrl";
@@ -134,7 +161,7 @@ void Generator::GenerateMessageHeader(const string& messagename,
       );
 }
 
-void Generator::GenerateMessageSource(const string& messagename,
+void ErlangGenerator::GenerateMessageSource(const string& messagename,
                                       const Descriptor* message,
                                       GeneratorContext* context) const {
   string filename = messagename + ".erl";
@@ -185,9 +212,3 @@ void Generator::GenerateMessageSource(const string& messagename,
 
   printer.Print("\n  }.\n");
 }
-
-
-} // namespace erlang
-} // namespace compiler
-} // namespace protobuf
-} // namespace google
