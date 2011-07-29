@@ -1,8 +1,14 @@
 -module(protobuf).
--export([decode_items/2, find_field/3, decode_file/3, enum_name/2, enum_value/2]).
--export([encode_varint/1, encode_key/2, varint_leading_bit/1, decode_varint/1]).
--export([encode_field/3, encode_item_value/2, decode_item_value/2]).
 -include("protobuf.hrl").
+
+% Functions to be called externally.
+-export([decode_file/3]).
+
+% Varint functions.
+-export([decode_varint/1, encode_varint/1]).
+
+% Interface used by generated code.
+-export([decode_items/2, find_field/3, encode_field/3, enum_name/2, enum_value/2]).
 
 
 % Decodes a varint from the Binary and returns a {Integer, Tail} tuple where
