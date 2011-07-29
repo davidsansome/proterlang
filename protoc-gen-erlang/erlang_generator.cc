@@ -357,8 +357,9 @@ string ErlangGenerator::FieldNestedTypeTuple(const FieldDescriptor* field) const
   }
 
   string module   = ErlangFilename(field->message_type()->file());
-  string function = "decode_" + ErlangThingName(field->message_type());
-  return "{'" + module + "', '" + function + "'}";
+  string decode = "decode_" + ErlangThingName(field->message_type());
+  string encode = "encode_" + ErlangThingName(field->message_type());
+  return "{'" + module + "', '" + decode + "', '" + encode + "'}";
 }
 
 string ErlangGenerator::FieldEnumFunctionsTuple(const FieldDescriptor* field) const {

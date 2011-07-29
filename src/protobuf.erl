@@ -87,6 +87,7 @@ decode_item(1, Binary) ->
   {Value, Tail};
 decode_item(2, Binary) ->
   {Length, Tail1} = decode_varint(Binary),
+  io:format("~w ~w~n", [Length, Tail1]),
   << String:Length/binary, Tail2/binary >> = Tail1,
   {String, Tail2};
 decode_item(5, Binary) ->
@@ -102,7 +103,7 @@ encode_item(1, Value) ->
 encode_item(2, Value) when is_list(Value) ->
   encode_item(2, list_to_binary(Value));
 encode_item(2, Value) when is_binary(Value) ->
-  << (encode_varint(size(Value)))/binary, Value >>;
+  << (encode_varint(size(Value)))/binary, Value/binary >>;
 encode_item(5, Value) ->
   << Value:32/float-little >>.
 
@@ -165,8 +166,8 @@ decode_item_value(0, #field_definition{type = bool}) ->
 decode_item_value(_, #field_definition{type = bool}) ->
   true;
 decode_item_value(Value, #field_definition{type = message,
-                                           nested_type = {Module, Function}}) ->
-  Module:Function(Value);
+                                           nested_type = {Module, Fun, _}}) ->
+  Module:Fun(Value);
 decode_item_value(Value, #field_definition{type = enum,
                                            enum_functions = {Module, V2N, _}}) ->
   Module:V2N(Value);
@@ -213,7 +214,10 @@ encode_item_value(Value, #field_definition{type = enum}) when is_integer(Value) 
 encode_item_value(Name, #field_definition{
     type = enum, enum_functions = {Module, _, N2V}}) when is_atom(Name) ->
   encode_varint(Module:N2V(Name));
-encode_item_value(Value, Type) ->
+encode_item_value(Record, #field_definition{
+    type = message, nested_type = {Module, _, Fun}}) when is_tuple(Record) ->
+  encode_item(wire_type(message), Module:Fun(Record));
+encode_item_value(Value, #field_definition{type = Type}) ->
   encode_item(wire_type(Type), Value).
 
 
