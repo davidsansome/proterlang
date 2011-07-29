@@ -282,6 +282,31 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   erl->Print("\n  }.\n\n");
 
 
+  // Output the encoding function
+  erl->Print(variables,
+      "encode_$messagename$(Record) ->\n"
+      "  << ");
+
+  for (int i=0 ; i<message->field_count() ; ++i) {
+    if (i != 0) {
+      erl->Print(",\n     ");
+    }
+
+    const FieldDescriptor* field = message->field(i);
+
+    variables["field_name"] = field->name();
+    variables["field_number"] = SimpleItoa(field->number());
+
+    erl->Print(variables,
+        "(protobuf:encode_field(Record#$messagename$.$field_name$, "
+                               "$field_number$, "
+                               "?$messagename_upper$_DEFINITION))"
+        "/binary");
+  }
+
+  erl->Print(" >>.\n\n");
+
+
   // Handle embedded types
   for (int i=0 ; i<message->enum_type_count() ; ++i) {
     GenerateEnum(message->enum_type(i), erl, hrl);

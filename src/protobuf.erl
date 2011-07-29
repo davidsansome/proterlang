@@ -1,6 +1,7 @@
 -module(protobuf).
 -export([decode_items/2, find_field/3, decode_file/3, enum_name/2, enum_value/2]).
 -export([encode_varint/1, encode_key/2, varint_leading_bit/1, decode_varint/1]).
+-export([encode_field/3, encode_item_value/2, decode_item_value/2]).
 -include("protobuf.hrl").
 
 
@@ -27,11 +28,10 @@ varint_leading_bit(_Value) ->
 
 
 % Encodes an integer Value as a varint.  Returns a binary.
-encode_varint(Value) ->
-  case encode_varint_1(Value) of
-    << >> -> <<0:8>>;
-    Ret   -> Ret
-  end.
+encode_varint(Value) when Value == 0 ->
+  <<0:8>>;
+encode_varint(Value) when Value > 0 ->
+  encode_varint_1(Value).
 
 encode_varint_1(Value) when Value == 0 ->
   << >>;
@@ -46,11 +46,34 @@ decode_key(Key) ->
   {Key band 16#7, Key bsr 3}.
 
 
+% Encodes a WireType and FieldNumber into a Key to go in the field header.
 encode_key(WireType, FieldNumber) ->
   (FieldNumber bsl 3) bor WireType.
 
 
+% Converts a type atom to an integer wire type.
+wire_type(int32)    -> 0;
+wire_type(int64)    -> 0;
+wire_type(uint32)   -> 0;
+wire_type(uint64)   -> 0;
+wire_type(sint32)   -> 0;
+wire_type(sint64)   -> 0;
+wire_type(bool)     -> 0;
+wire_type(enum)     -> 0;
+wire_type(fixed64)  -> 1;
+wire_type(sfixed64) -> 1;
+wire_type(double)   -> 1;
+wire_type(string)   -> 2;
+wire_type(bytes)    -> 2;
+wire_type(message)  -> 2;
+wire_type(fixed32)  -> 5;
+wire_type(sfixed32) -> 5;
+wire_type('float')  -> 5.
+
+
 % Decodes an encoded item from the binary.  The first argument is the wire type.
+% Returns a {Value, Tail} tuple, where Tail is the remainder of the Binary
+% after the Value.
 decode_item(0, Binary) ->
   decode_varint(Binary);
 decode_item(1, Binary) ->
@@ -63,6 +86,19 @@ decode_item(2, Binary) ->
 decode_item(5, Binary) ->
   << Value:32/float-little, Tail/binary >> = Binary,
   {Value, Tail}.
+
+
+% Encodes an item to a binary.  The first argument is the wire type.
+encode_item(0, Value) ->
+  encode_varint(Value);
+encode_item(1, Value) ->
+  << Value:64/float-little >>;
+encode_item(2, Value) when is_list(Value) ->
+  encode_item(2, list_to_binary(Value));
+encode_item(2, Value) when is_binary(Value) ->
+  << (encode_varint(size(Value)))/binary, Value >>;
+encode_item(5, Value) ->
+  << Value:32/float-little >>.
 
 
 % Decodes encoded protobuf fields from a binary.  Returns a list of
@@ -83,13 +119,14 @@ decode_items(Binary, MessageDefinition, Acc) ->
   % The raw value might need converting to the actual type we're expecting, for
   % example 1 needs to be converted to true for bools, and signed ints need to
   % be interpreted correctly
-  Value2 = convert_item_value(Value1, FieldNumber, MessageDefinition),
+  Value2 = decode_item_value(Value1, FieldNumber, MessageDefinition),
 
   % Decode any remaining items from the tail of the binary.
   decode_items(Tail2, MessageDefinition, [{FieldNumber, Value2} | Acc]).
 
 
-convert_item_value(Value, FieldNumber, MessageDefinition) ->
+% Converts the value from its raw wire type to a more sensible Erlang type.
+decode_item_value(Value, FieldNumber, MessageDefinition) ->
   % Get the field definition
   Definition = lists:keyfind(FieldNumber, #field_definition.number,
     MessageDefinition#message_definition.fields),
@@ -99,30 +136,68 @@ convert_item_value(Value, FieldNumber, MessageDefinition) ->
       % We don't know about this field number, just leave the value alone.
       Value;
     #field_definition{type = Type} ->
-      convert_item_value(Value, Type)
+      decode_item_value(Value, Type)
   end.
 
-convert_item_value(Value, int32) ->
-  convert_item_value(Value, int64);
-convert_item_value(Value, int64) ->
+decode_item_value(Value, int32) ->
+  decode_item_value(Value, int64);
+decode_item_value(Value, int64) ->
   <<Ret:64/signed-integer>> = <<Value:64>>,
   Ret;
-convert_item_value(Value, uint32) ->
-  convert_item_value(Value, uint64);
-convert_item_value(Value, uint64) ->
+decode_item_value(Value, uint32) ->
+  decode_item_value(Value, uint64);
+decode_item_value(Value, uint64) ->
   Value;
-convert_item_value(Value, sint32) ->
-  convert_item_value(Value, sint64);
-convert_item_value(Value, sint64) when Value band 1 == 0 ->
+decode_item_value(Value, sint32) ->
+  decode_item_value(Value, sint64);
+decode_item_value(Value, sint64) when Value band 1 == 0 ->
   Value bsr 1;
-convert_item_value(Value, sint64) when Value band 1 == 1 ->
+decode_item_value(Value, sint64) when Value band 1 == 1 ->
   - ((Value + 1) bsr 1);
-convert_item_value(0, bool) ->
+decode_item_value(0, bool) ->
   false;
-convert_item_value(_, bool) ->
+decode_item_value(_, bool) ->
   true;
-convert_item_value(Value, _) ->
+decode_item_value(Value, _) ->
   Value.
+
+
+% Encodes a record value into a binary, taking account of the field type.
+encode_field(Value, FieldNumber, MessageDefinition) ->
+  % Get the field definition.  This will always exist.
+  Definition = lists:keyfind(FieldNumber, #field_definition.number,
+    MessageDefinition#message_definition.fields),
+
+  Type = Definition#field_definition.type,
+  Key = encode_key(wire_type(Type), FieldNumber),
+  EncodedValue = encode_item_value(Value, Type),
+
+  << (encode_varint(Key))/binary, EncodedValue/binary >>.
+
+
+encode_item_value(Value, int32) ->
+  encode_item_value(Value, int64);
+encode_item_value(Value, int64) ->
+  <<Value2:64/integer-unsigned>> = <<Value:64/integer-unsigned>>,
+  encode_varint(Value2);
+encode_item_value(Value, uint32) ->
+  encode_item_value(Value, uint64);
+encode_item_value(Value, uint64) when Value >= 0 ->
+  encode_varint(Value);
+encode_item_value(Value, sint32) ->
+  encode_item_value(Value, sint64);
+encode_item_value(Value, sint64) when Value >= 0 ->
+  encode_varint(Value bsl 1);
+encode_item_value(Value, sint64) ->
+  encode_varint(((- Value) bsl 1) - 1);
+encode_item_value(0, bool) ->
+  encode_varint(0);
+encode_item_value(false, bool) ->
+  encode_varint(0);
+encode_item_value(_, bool) ->
+  encode_varint(1);
+encode_item_value(Value, Type) ->
+  encode_item(wire_type(Type), Value).
 
 
 % Convenience function that decodes a message from a file.  Module and Function
