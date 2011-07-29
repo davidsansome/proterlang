@@ -1,5 +1,5 @@
 -module(protobuf).
--export([decode_items/1, find_field/3]).
+-export([decode_items/1, find_field/3, decode_file/3]).
 -include("protobuf.hrl").
 
 
@@ -55,12 +55,21 @@ decode_items(Binary, Acc) ->
   decode_items(Tail2, [{FieldNumber, Item} | Acc]).
 
 
+decode_file(Filename, Module, Function) ->
+  case file:read_file(Filename) of
+    {ok, Binary} ->
+      Module:Function(Binary);
+    {error, _Reason} = Error ->
+      Error
+  end.
+
+
 % If the field definition says this value is a nested type, decode the value
 % into a record of the nested type.  Otherwise just return the value as is.
 decode_nested_type(Value, #field_definition{nested_type = undefined}) ->
   Value;
-decode_nested_type(Value, #field_definition{nested_type = NestedTypeModule}) ->
-  NestedTypeModule:decode_binary(Value).
+decode_nested_type(Value, #field_definition{nested_type = {Module, Function}}) ->
+  Module:Function(Value).
 
 
 % Finds a field with the given field number in the list of decoded items.

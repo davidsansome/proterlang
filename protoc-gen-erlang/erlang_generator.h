@@ -13,12 +13,12 @@ namespace google {
     class EnumValueDescriptor;
     class FieldDescriptor;
     class ServiceDescriptor;
+
+    namespace io {
+      class Printer;
+    }
   }
 }
-
-using google::protobuf::Descriptor;
-using google::protobuf::FileDescriptor;
-using google::protobuf::compiler::GeneratorContext;
 
 
 class ErlangGenerator : public google::protobuf::compiler::CodeGenerator {
@@ -26,18 +26,28 @@ public:
   ErlangGenerator();
   virtual ~ErlangGenerator();
 
-  virtual bool Generate(const FileDescriptor* file,
-                        const std::string& parameter,
-                        GeneratorContext* generator_context,
-                        std::string* error) const;
+  virtual bool Generate(
+      const google::protobuf::FileDescriptor* file,
+      const std::string& parameter,
+      google::protobuf::compiler::GeneratorContext* generator_context,
+      std::string* error) const;
 
 private:
-  void GenerateMessageHeader(const std::string& messagename,
-                             const Descriptor* msg,
-                             GeneratorContext* context) const;
-  void GenerateMessageSource(const std::string& messagename,
-                             const Descriptor* msg,
-                             GeneratorContext* context) const;
+  void GenerateMessage(
+      const google::protobuf::Descriptor* msg,
+      google::protobuf::compiler::GeneratorContext* context,
+      google::protobuf::io::Printer* erl,
+      google::protobuf::io::Printer* hrl) const;
+
+  void GenerateErlExports(
+      const google::protobuf::FileDescriptor* file,
+      google::protobuf::io::Printer* erl) const;
+  void GenerateErlExports(
+      const google::protobuf::Descriptor* message,
+      google::protobuf::io::Printer* erl) const;
+  void GenerateErlExports(
+      const google::protobuf::EnumDescriptor* enum_des,
+      google::protobuf::io::Printer* erl) const;
 };
 
 #endif // GENERATOR_H

@@ -9,6 +9,7 @@
 using std::string;
 
 using namespace google::protobuf;
+using namespace google::protobuf::compiler;
 
 namespace {
 
@@ -41,17 +42,42 @@ inline string SimpleItoa(int value) {
   return out.str();
 }
 
+inline void ReplaceChar(char from, char to, string* s) {
+  for (string::iterator it = s->begin() ; it != s->end() ; ++it) {
+    if (*it == from) {
+      *it = to;
+    }
+  }
+}
+
+
 // Returns the Erlang module base name expected for a given .proto filename.
-string ModuleBaseName(const string& filename) {
-  string basename = filename;
+string ErlangFilename(const FileDescriptor* file) {
+  string basename = file->name();
   StripSuffix(".proto", &basename);
+
+  // Strip everything before the final slash, if there is one.
+  const size_t slash_pos = basename.rfind('/');
+  if (slash_pos != string::npos) {
+    basename = basename.substr(slash_pos);
+  }
+
   return basename;
 }
 
-string MessageName(const string& module, const Descriptor* message) {
-  string ret = module + "_" + message->name() + "_pb";
+string ErlangThingName(const string& modulename) {
+  string ret = modulename + "_pb";
+  ReplaceChar('.', '_', &ret);
   LowerString(&ret);
   return ret;
+}
+
+string ErlangThingName(const Descriptor* message) {
+  return ErlangThingName(message->full_name());
+}
+
+string ErlangThingName(const EnumDescriptor* enum_des) {
+  return ErlangThingName(enum_des->full_name());
 }
 
 } // namespace
@@ -65,66 +91,110 @@ ErlangGenerator::~ErlangGenerator() {
 
 bool ErlangGenerator::Generate(const FileDescriptor* file,
                          const string& parameter,
-                         GeneratorContext* generator_context,
+                         GeneratorContext* context,
                          string* error) const {
-  string basename = ModuleBaseName(file->name());
+  string basename = ErlangFilename(file);
+  string erl_filename = basename + ".erl";
+  string hrl_filename = basename + ".hrl";
+
+  scoped_ptr<io::ZeroCopyOutputStream> erl(context->Open(erl_filename));
+  scoped_ptr<io::ZeroCopyOutputStream> hrl(context->Open(hrl_filename));
+
+  io::Printer erl_printer(erl.get(), '$');
+  io::Printer hrl_printer(hrl.get(), '$');
+
+  // Print the erl header
+  erl_printer.Print("-module($basename$).\n"
+                    "-include(\"protobuf.hrl\").\n"
+                    "-include(\"$basename$.hrl\").\n"
+                    "\n",
+                    "basename", basename);
+  GenerateErlExports(file, &erl_printer);
+  erl_printer.Print("\n");
 
   for (int i=0; i<file->message_type_count(); ++i) {
     const Descriptor* message = file->message_type(i);
-    string messagename = MessageName(basename, message);
-
-    GenerateMessageHeader(messagename, message, generator_context);
-    GenerateMessageSource(messagename, message, generator_context);
+    GenerateMessage(message, context, &erl_printer, &hrl_printer);
   }
 
   return true;
 }
 
-void ErlangGenerator::GenerateMessageHeader(const string& messagename,
-                                      const Descriptor* message,
-                                      GeneratorContext* context) const {
-  string filename = messagename + ".hrl";
+void ErlangGenerator::GenerateErlExports(
+    const google::protobuf::FileDescriptor* file,
+    google::protobuf::io::Printer* erl) const {
+  for (int i=0; i<file->enum_type_count(); ++i) {
+    GenerateErlExports(file->enum_type(i), erl);
+  }
+  for (int i=0; i<file->message_type_count(); ++i) {
+    GenerateErlExports(file->message_type(i), erl);
+  }
+}
 
-  scoped_ptr<io::ZeroCopyOutputStream> output(context->Open(filename));
-  io::Printer printer(output.get(), '$');
+void ErlangGenerator::GenerateErlExports(
+    const google::protobuf::Descriptor* message,
+    google::protobuf::io::Printer* erl) const {
+  erl->Print("-export([decode_$name$/1]).\n",
+             "name", ErlangThingName(message));
 
-  string upper_name = messagename;
-  UpperString(&upper_name);
+  for (int i=0 ; i<message->enum_type_count() ; ++i) {
+    GenerateErlExports(message->enum_type(i), erl);
+  }
+  for (int i=0 ; i<message->nested_type_count() ; ++i) {
+    GenerateErlExports(message->nested_type(i), erl);
+  }
+}
 
-  printer.Print(
-      "-include(\"protobuf.hrl\").\n"
-      "\n"
-      "-record($messagename$, {\n",
-      "messagename", messagename);
+void ErlangGenerator::GenerateErlExports(
+    const google::protobuf::EnumDescriptor* enum_des,
+    google::protobuf::io::Printer* erl) const {
+  // TODO
+}
 
+void ErlangGenerator::GenerateMessage(const Descriptor* message,
+                                      GeneratorContext* context,
+                                      io::Printer* erl,
+                                      io::Printer* hrl) const {
+  string messagename = ErlangThingName(message);
+  string messagename_upper = messagename;
+  UpperString(&messagename_upper);
+
+  map<string, string> variables;
+  variables["name"] = message->name();
+  variables["messagename"] = messagename;
+  variables["messagename_upper"] = messagename_upper;
+
+  // Start the record type
+  hrl->Print(variables, "-record($messagename$, {\n");
+
+  // Output each field into the record type
   for (int i=0 ; i<message->field_count() ; ++i) {
     if (i != 0) {
-      printer.Print(",\n");
+      hrl->Print(",\n");
     }
-    printer.Print("  $field_name$",
-                  "field_name", message->field(i)->name());
+    variables["field_name"] = message->field(i)->name();
+    hrl->Print(variables, "  $field_name$");
   }
 
-  printer.Print(
-      "\n"
-      "}).\n"
-      "\n"
-      "-define($upper_name$_DEFINITION, #message_definition{\n"
-      "  name = \"$name$\",\n"
-      "  fields = [\n",
-      "upper_name", upper_name,
-      "name", message->name());
+  // Finish the record type
+  hrl->Print("\n}).\n\n");
 
+  // Start the definition
+  hrl->Print(variables,
+             "-define($messagename_upper$_DEFINITION, #message_definition{\n"
+             "  name = \"$name$\",\n"
+             "  fields = [\n");
+
+  // Output each field into the definition
   for (int i=0 ; i<message->field_count() ; ++i) {
     if (i != 0) {
-      printer.Print(",\n");
+      hrl->Print(",\n");
     }
 
     const FieldDescriptor* field = message->field(i);
 
-    map<string, string> variables;
-    variables["name"] = field->name();
-    variables["number"] = SimpleItoa(field->number());
+    variables["field_name"] = field->name();
+    variables["field_number"] = SimpleItoa(field->number());
     variables["label_atom"] = "undefined";
     variables["nested_type"] = "undefined";
 
@@ -141,74 +211,46 @@ void ErlangGenerator::GenerateMessageHeader(const string& messagename,
     }
 
     if (field->type() == FieldDescriptor::TYPE_MESSAGE) {
-      string modulename = ModuleBaseName(field->message_type()->file()->name());
-      variables["nested_type"] = MessageName(modulename, field->message_type());
+      variables["nested_type"] = "{" +
+          ErlangFilename(field->message_type()->file()) + ", " +
+          "decode_" + ErlangThingName(field->message_type()) + "}";
     }
 
-    printer.Print(variables,
+    hrl->Print(variables,
         "    #field_definition{\n"
-        "      name = \"$name$\",\n"
-        "      number = $number$,\n"
+        "      name = \"$field_name$\",\n"
+        "      number = $field_number$,\n"
         "      label = $label_atom$,\n"
         "      nested_type = $nested_type$\n"
         "    }");
   }
 
-  printer.Print(
-      "\n"
-      "  ]\n"
-      "}).\n"
-      );
-}
+  // Finish definition
+  hrl->Print("\n  ]\n}).\n\n");
 
-void ErlangGenerator::GenerateMessageSource(const string& messagename,
-                                      const Descriptor* message,
-                                      GeneratorContext* context) const {
-  string filename = messagename + ".erl";
 
-  scoped_ptr<io::ZeroCopyOutputStream> output(context->Open(filename));
-  io::Printer printer(output.get(), '$');
-
-  string messagename_upper = messagename;
-  UpperString(&messagename_upper);
-
-  map<string, string> variables;
-  variables["messagename"] = messagename;
-  variables["messagename_upper"] = messagename_upper;
-
-  printer.Print(variables,
-      "-module($messagename$).\n"
-      "-export([decode_file/1, decode_binary/1]).\n"
-      "-include(\"$messagename$.hrl\").\n"
-      "\n"
-      "decode_file(Filename) ->\n"
-      "  case file:read_file(Filename) of\n"
-      "    {ok, Binary} ->\n"
-      "      decode_binary(Binary);\n"
-      "    {error, _Reason} = Error ->\n"
-      "      Error\n"
-      "  end.\n"
-      "\n"
-      "decode_binary(Binary) ->\n"
+  // Output the decoding function
+  erl->Print(variables,
+      "decode_$messagename$(Binary) ->\n"
       "  Items = protobuf:decode_items(Binary),\n"
       "  #$messagename${\n"
       );
 
   for (int i=0 ; i<message->field_count() ; ++i) {
     if (i != 0) {
-      printer.Print(",\n");
+      erl->Print(",\n");
     }
 
     const FieldDescriptor* field = message->field(i);
 
-    variables["fieldname"] = field->name();
-    variables["number"] = SimpleItoa(field->number());
+    variables["field_name"] = field->name();
+    variables["field_number"] = SimpleItoa(field->number());
 
-    printer.Print(variables,
-        "    $fieldname$ = protobuf:find_field("
-                 "Items, $number$, ?$messagename_upper$_DEFINITION)"
+    erl->Print(variables,
+        "    $field_name$ = protobuf:find_field("
+                 "Items, $field_number$, ?$messagename_upper$_DEFINITION)"
         );
   }
 
-  printer.Print("\n  }.\n");
+  erl->Print("\n  }.\n\n");
 }
