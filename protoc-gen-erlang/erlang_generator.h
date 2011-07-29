@@ -33,9 +33,12 @@ public:
       std::string* error) const;
 
 private:
+  void GenerateEnum(
+      const google::protobuf::EnumDescriptor* des,
+      google::protobuf::io::Printer* erl,
+      google::protobuf::io::Printer* hrl) const;
   void GenerateMessage(
       const google::protobuf::Descriptor* msg,
-      google::protobuf::compiler::GeneratorContext* context,
       google::protobuf::io::Printer* erl,
       google::protobuf::io::Printer* hrl) const;
 

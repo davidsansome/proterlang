@@ -1,5 +1,5 @@
 -module(protobuf).
--export([decode_items/1, find_field/3, decode_file/3]).
+-export([decode_items/1, find_field/3, decode_file/3, enum_name/2, enum_value/2]).
 -include("protobuf.hrl").
 
 
@@ -94,4 +94,13 @@ find_field(Items, FieldNumber, MessageDefinition) ->
     {FieldNumber, Value} ->
       decode_nested_type(Value, Definition)
   end.
+
+
+enum_name(Value, EnumValues) when is_integer(Value) ->
+  {Name, Value} = lists:keyfind(Value, 2, EnumValues),
+  Name.
+
+enum_value(Name, EnumValues) when is_atom(Name) ->
+  {Name, Value} = lists:keyfind(Name, 1, EnumValues),
+  Value.
 

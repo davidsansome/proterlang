@@ -112,9 +112,16 @@ bool ErlangGenerator::Generate(const FileDescriptor* file,
   GenerateErlExports(file, &erl_printer);
   erl_printer.Print("\n");
 
+  // Print enum types
+  for (int i=0 ; i<file->enum_type_count() ; ++i) {
+    const EnumDescriptor* enum_des = file->enum_type(i);
+    GenerateEnum(enum_des, &erl_printer, &hrl_printer);
+  }
+
+  // Print messages
   for (int i=0; i<file->message_type_count(); ++i) {
     const Descriptor* message = file->message_type(i);
-    GenerateMessage(message, context, &erl_printer, &hrl_printer);
+    GenerateMessage(message, &erl_printer, &hrl_printer);
   }
 
   return true;
@@ -148,11 +155,49 @@ void ErlangGenerator::GenerateErlExports(
 void ErlangGenerator::GenerateErlExports(
     const google::protobuf::EnumDescriptor* enum_des,
     google::protobuf::io::Printer* erl) const {
-  // TODO
+  erl->Print("-export([$name$_name/1, $name$_value/1]).\n",
+             "name", ErlangThingName(enum_des));
+}
+
+void ErlangGenerator::GenerateEnum(const EnumDescriptor* des,
+                                   io::Printer* erl,
+                                   io::Printer* hrl) const {
+  string enumname = ErlangThingName(des);
+  string enumname_upper = enumname;
+  UpperString(&enumname_upper);
+
+  map<string, string> variables;
+  variables["name"] = des->name();
+  variables["enumname"] = enumname;
+  variables["enumname_upper"] = enumname_upper;
+
+  hrl->Print(variables, "-define($enumname_upper$_VALUES, [\n");
+
+  for (int i=0 ; i<des->value_count() ; ++i) {
+    if (i != 0) {
+      hrl->Print(",\n");
+    }
+
+    const EnumValueDescriptor* value = des->value(i);
+    variables["valuename"] = value->name();
+    variables["valuenumber"] = SimpleItoa(value->number());
+
+    hrl->Print(variables, "  {'$valuename$', $valuenumber$}");
+  }
+
+  hrl->Print("\n]).\n\n");
+
+  erl->Print(variables,
+             "$enumname$_name(Value) ->\n"
+             "  protobuf:enum_name(Value, ?$enumname_upper$_VALUES).\n"
+             "\n"
+             "$enumname$_value(Name) ->\n"
+             "  protobuf:enum_value(Name, ?$enumname_upper$_VALUES).\n"
+             "\n"
+             "\n");
 }
 
 void ErlangGenerator::GenerateMessage(const Descriptor* message,
-                                      GeneratorContext* context,
                                       io::Printer* erl,
                                       io::Printer* hrl) const {
   string messagename = ErlangThingName(message);
@@ -253,4 +298,13 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   }
 
   erl->Print("\n  }.\n\n");
+
+
+  // Handle embedded types
+  for (int i=0 ; i<message->enum_type_count() ; ++i) {
+    GenerateEnum(message->enum_type(i), erl, hrl);
+  }
+  for (int i=0 ; i<message->nested_type_count() ; ++i) {
+    GenerateMessage(message->nested_type(i), erl, hrl);
+  }
 }
