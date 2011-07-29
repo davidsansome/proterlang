@@ -87,7 +87,6 @@ decode_item(1, Binary) ->
   {Value, Tail};
 decode_item(2, Binary) ->
   {Length, Tail1} = decode_varint(Binary),
-  io:format("~w ~w~n", [Length, Tail1]),
   << String:Length/binary, Tail2/binary >> = Tail1,
   {String, Tail2};
 decode_item(5, Binary) ->
