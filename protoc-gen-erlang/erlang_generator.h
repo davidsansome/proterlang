@@ -20,37 +20,38 @@ namespace google {
   }
 }
 
+using google::protobuf::Descriptor;
+using google::protobuf::EnumDescriptor;
+using google::protobuf::FieldDescriptor;
+using google::protobuf::FileDescriptor;
+using google::protobuf::compiler::CodeGenerator;
+using google::protobuf::compiler::GeneratorContext;
+using google::protobuf::io::Printer;
+using std::string;
 
-class ErlangGenerator : public google::protobuf::compiler::CodeGenerator {
+
+class ErlangGenerator : public CodeGenerator {
 public:
   ErlangGenerator();
   virtual ~ErlangGenerator();
 
   virtual bool Generate(
-      const google::protobuf::FileDescriptor* file,
-      const std::string& parameter,
-      google::protobuf::compiler::GeneratorContext* generator_context,
-      std::string* error) const;
+      const FileDescriptor* file,
+      const string& parameter,
+      GeneratorContext* generator_context,
+      string* error) const;
 
 private:
-  void GenerateEnum(
-      const google::protobuf::EnumDescriptor* des,
-      google::protobuf::io::Printer* erl,
-      google::protobuf::io::Printer* hrl) const;
-  void GenerateMessage(
-      const google::protobuf::Descriptor* msg,
-      google::protobuf::io::Printer* erl,
-      google::protobuf::io::Printer* hrl) const;
+  void GenerateErlExports(const FileDescriptor* file, Printer* erl) const;
+  void GenerateErlExports(const Descriptor* message, Printer* erl) const;
+  void GenerateErlExports(const EnumDescriptor* enum_des, Printer* erl) const;
 
-  void GenerateErlExports(
-      const google::protobuf::FileDescriptor* file,
-      google::protobuf::io::Printer* erl) const;
-  void GenerateErlExports(
-      const google::protobuf::Descriptor* message,
-      google::protobuf::io::Printer* erl) const;
-  void GenerateErlExports(
-      const google::protobuf::EnumDescriptor* enum_des,
-      google::protobuf::io::Printer* erl) const;
+  void GenerateEnum(const EnumDescriptor* des, Printer* erl, Printer* hrl) const;
+  void GenerateMessage(const Descriptor* msg, Printer* erl, Printer* hrl) const;
+
+  string FieldTypeAtom(const FieldDescriptor* field) const;
+  string FieldLabelAtom(const FieldDescriptor* field) const;
+  string FieldNestedTypeTuple(const FieldDescriptor* field) const;
 };
 
 #endif // GENERATOR_H

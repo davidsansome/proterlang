@@ -6,13 +6,13 @@
 
 #include <sstream>
 
-using std::string;
-
 using namespace google::protobuf;
 using namespace google::protobuf::compiler;
 
+
 namespace {
 
+// Some useful private string manipulation functions from libproto.
 inline void StripSuffix(const string& suffix, string* s) {
   const int pos = s->rfind(suffix);
   if (pos != string::npos && pos == s->size() - suffix.size()) {
@@ -52,6 +52,7 @@ inline void ReplaceChar(char from, char to, string* s) {
 
 
 // Returns the Erlang module base name expected for a given .proto filename.
+// This is used as the Erlang module name.
 string ErlangFilename(const FileDescriptor* file) {
   string basename = file->name();
   StripSuffix(".proto", &basename);
@@ -65,8 +66,9 @@ string ErlangFilename(const FileDescriptor* file) {
   return basename;
 }
 
-string ErlangThingName(const string& modulename) {
-  string ret = modulename + "_pb";
+// Returns the name of the Erlang type for a protobuf object.
+string ErlangThingName(const string& full_name) {
+  string ret = full_name + "_pb";
   ReplaceChar('.', '_', &ret);
   LowerString(&ret);
   return ret;
@@ -93,6 +95,7 @@ bool ErlangGenerator::Generate(const FileDescriptor* file,
                          const string& parameter,
                          GeneratorContext* context,
                          string* error) const {
+
   string basename = ErlangFilename(file);
   string erl_filename = basename + ".erl";
   string hrl_filename = basename + ".hrl";
@@ -103,7 +106,7 @@ bool ErlangGenerator::Generate(const FileDescriptor* file,
   io::Printer erl_printer(erl.get(), '$');
   io::Printer hrl_printer(hrl.get(), '$');
 
-  // Print the erl header
+  // Print the common stuff at the top of the erl file.
   erl_printer.Print("-module($basename$).\n"
                     "-include(\"protobuf.hrl\").\n"
                     "-include(\"$basename$.hrl\").\n"
@@ -127,9 +130,7 @@ bool ErlangGenerator::Generate(const FileDescriptor* file,
   return true;
 }
 
-void ErlangGenerator::GenerateErlExports(
-    const google::protobuf::FileDescriptor* file,
-    google::protobuf::io::Printer* erl) const {
+void ErlangGenerator::GenerateErlExports(const FileDescriptor* file, Printer* erl) const {
   for (int i=0; i<file->enum_type_count(); ++i) {
     GenerateErlExports(file->enum_type(i), erl);
   }
@@ -138,12 +139,11 @@ void ErlangGenerator::GenerateErlExports(
   }
 }
 
-void ErlangGenerator::GenerateErlExports(
-    const google::protobuf::Descriptor* message,
-    google::protobuf::io::Printer* erl) const {
+void ErlangGenerator::GenerateErlExports(const Descriptor* message, Printer* erl) const {
   erl->Print("-export([decode_$name$/1]).\n",
              "name", ErlangThingName(message));
 
+  // Embedded types
   for (int i=0 ; i<message->enum_type_count() ; ++i) {
     GenerateErlExports(message->enum_type(i), erl);
   }
@@ -152,16 +152,14 @@ void ErlangGenerator::GenerateErlExports(
   }
 }
 
-void ErlangGenerator::GenerateErlExports(
-    const google::protobuf::EnumDescriptor* enum_des,
-    google::protobuf::io::Printer* erl) const {
+void ErlangGenerator::GenerateErlExports(const EnumDescriptor* enum_des, Printer* erl) const {
   erl->Print("-export([$name$_name/1, $name$_value/1]).\n",
              "name", ErlangThingName(enum_des));
 }
 
 void ErlangGenerator::GenerateEnum(const EnumDescriptor* des,
-                                   io::Printer* erl,
-                                   io::Printer* hrl) const {
+                                   Printer* erl,
+                                   Printer* hrl) const {
   string enumname = ErlangThingName(des);
   string enumname_upper = enumname;
   UpperString(&enumname_upper);
@@ -198,8 +196,8 @@ void ErlangGenerator::GenerateEnum(const EnumDescriptor* des,
 }
 
 void ErlangGenerator::GenerateMessage(const Descriptor* message,
-                                      io::Printer* erl,
-                                      io::Printer* hrl) const {
+                                      Printer* erl,
+                                      Printer* hrl) const {
   string messagename = ErlangThingName(message);
   string messagename_upper = messagename;
   UpperString(&messagename_upper);
@@ -239,33 +237,17 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     const FieldDescriptor* field = message->field(i);
 
     variables["field_name"] = field->name();
+    variables["field_type"] = FieldTypeAtom(field);
     variables["field_number"] = SimpleItoa(field->number());
-    variables["label_atom"] = "undefined";
-    variables["nested_type"] = "undefined";
-
-    switch(field->label()) {
-      case FieldDescriptor::LABEL_OPTIONAL:
-        variables["label_atom"] = "optional";
-        break;
-      case FieldDescriptor::LABEL_REPEATED:
-        variables["label_atom"] = "repeated";
-        break;
-      case FieldDescriptor::LABEL_REQUIRED:
-        variables["label_atom"] = "required";
-        break;
-    }
-
-    if (field->type() == FieldDescriptor::TYPE_MESSAGE) {
-      variables["nested_type"] = "{" +
-          ErlangFilename(field->message_type()->file()) + ", " +
-          "decode_" + ErlangThingName(field->message_type()) + "}";
-    }
+    variables["label_atom"] = FieldLabelAtom(field);
+    variables["nested_type"] = FieldNestedTypeTuple(field);
 
     hrl->Print(variables,
         "    #field_definition{\n"
-        "      name = \"$field_name$\",\n"
+        "      name = <<\"$field_name$\">>,\n"
+        "      type = '$field_type$',\n"
         "      number = $field_number$,\n"
-        "      label = $label_atom$,\n"
+        "      label = '$label_atom$',\n"
         "      nested_type = $nested_type$\n"
         "    }");
   }
@@ -277,7 +259,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   // Output the decoding function
   erl->Print(variables,
       "decode_$messagename$(Binary) ->\n"
-      "  Items = protobuf:decode_items(Binary),\n"
+      "  Items = protobuf:decode_items(Binary, ?$messagename_upper$_DEFINITION),\n"
       "  #$messagename${\n"
       );
 
@@ -307,4 +289,47 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   for (int i=0 ; i<message->nested_type_count() ; ++i) {
     GenerateMessage(message->nested_type(i), erl, hrl);
   }
+}
+
+string ErlangGenerator::FieldTypeAtom(const FieldDescriptor* field) const {
+  switch (field->type()) {
+    case FieldDescriptor::TYPE_DOUBLE:   return "double";
+    case FieldDescriptor::TYPE_FLOAT:    return "float";
+    case FieldDescriptor::TYPE_INT64:    return "int64";
+    case FieldDescriptor::TYPE_UINT64:   return "uint64";
+    case FieldDescriptor::TYPE_INT32:    return "int32";
+    case FieldDescriptor::TYPE_FIXED64:  return "fixed64";
+    case FieldDescriptor::TYPE_FIXED32:  return "fixed32";
+    case FieldDescriptor::TYPE_BOOL:     return "bool";
+    case FieldDescriptor::TYPE_STRING:   return "string";
+    case FieldDescriptor::TYPE_GROUP:    return "group";
+    case FieldDescriptor::TYPE_MESSAGE:  return "message";
+    case FieldDescriptor::TYPE_BYTES:    return "bytes";
+    case FieldDescriptor::TYPE_UINT32:   return "uint32";
+    case FieldDescriptor::TYPE_ENUM:     return "enum";
+    case FieldDescriptor::TYPE_SFIXED32: return "sfixed32";
+    case FieldDescriptor::TYPE_SFIXED64: return "sfixed64";
+    case FieldDescriptor::TYPE_SINT32:   return "sint32";
+    case FieldDescriptor::TYPE_SINT64:   return "sint64";
+  }
+  return "undefined";
+}
+
+string ErlangGenerator::FieldLabelAtom(const FieldDescriptor* field) const {
+  switch (field->label()) {
+    case FieldDescriptor::LABEL_OPTIONAL: return "optional";
+    case FieldDescriptor::LABEL_REPEATED: return "repeated";
+    case FieldDescriptor::LABEL_REQUIRED: return "required";
+  }
+  return "undefined";
+}
+
+string ErlangGenerator::FieldNestedTypeTuple(const FieldDescriptor* field) const {
+  if (field->type() != FieldDescriptor::TYPE_MESSAGE) {
+    return "'undefined'";
+  }
+
+  string module   = ErlangFilename(field->message_type()->file());
+  string function = "decode_" + ErlangThingName(field->message_type());
+  return "{'" + module + "', '" + function + "'}";
 }
