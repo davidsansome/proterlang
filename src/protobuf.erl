@@ -182,32 +182,37 @@ encode_field(Value, FieldNumber, MessageDefinition) ->
 
   Type = Definition#field_definition.type,
   Key = encode_key(wire_type(Type), FieldNumber),
-  EncodedValue = encode_item_value(Value, Type),
+  EncodedValue = encode_item_value(Value, Definition),
 
   << (encode_varint(Key))/binary, EncodedValue/binary >>.
 
 
-encode_item_value(Value, int32) ->
-  encode_item_value(Value, int64);
-encode_item_value(Value, int64) ->
+encode_item_value(Value, #field_definition{type = int32} = Def) ->
+  encode_item_value(Value, Def#field_definition{type = int64});
+encode_item_value(Value, #field_definition{type = int64}) ->
   <<Value2:64/integer-unsigned>> = <<Value:64/integer-unsigned>>,
   encode_varint(Value2);
-encode_item_value(Value, uint32) ->
-  encode_item_value(Value, uint64);
-encode_item_value(Value, uint64) when Value >= 0 ->
+encode_item_value(Value, #field_definition{type = uint32} = Def) ->
+  encode_item_value(Value, Def#field_definition{type = uint64});
+encode_item_value(Value, #field_definition{type = uint64}) when Value >= 0 ->
   encode_varint(Value);
-encode_item_value(Value, sint32) ->
-  encode_item_value(Value, sint64);
-encode_item_value(Value, sint64) when Value >= 0 ->
+encode_item_value(Value, #field_definition{type = sint32} = Def) ->
+  encode_item_value(Value, Def#field_definition{type = sint64});
+encode_item_value(Value, #field_definition{type = sint64}) when Value >= 0 ->
   encode_varint(Value bsl 1);
-encode_item_value(Value, sint64) ->
+encode_item_value(Value, #field_definition{type = sint64}) ->
   encode_varint(((- Value) bsl 1) - 1);
-encode_item_value(0, bool) ->
+encode_item_value(0, #field_definition{type = bool}) ->
   encode_varint(0);
-encode_item_value(false, bool) ->
+encode_item_value(false, #field_definition{type = bool}) ->
   encode_varint(0);
-encode_item_value(_, bool) ->
+encode_item_value(_, #field_definition{type = bool}) ->
   encode_varint(1);
+encode_item_value(Value, #field_definition{type = enum}) when is_integer(Value) ->
+  encode_varint(Value);
+encode_item_value(Name, #field_definition{
+    type = enum, enum_functions = {Module, _, N2V}}) when is_atom(Name) ->
+  encode_varint(Module:N2V(Name));
 encode_item_value(Value, Type) ->
   encode_item(wire_type(Type), Value).
 
