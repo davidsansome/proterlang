@@ -33,3 +33,23 @@ message TestMessage {
   optional NestedEnum nested_enum = 17;
   optional NestedMessage nested_message = 18;
 }
+
+message DefaultValuesMessage {
+  optional double   a_double = 1     [default=1.2];
+  optional float    a_float = 2      [default=3.4];
+  optional int32    a_int32 = 3      [default=-56];
+  optional int64    a_int64 = 4      [default=78];
+  optional uint32   a_uint32 = 5     [default=90];
+  optional uint64   a_uint64 = 6     [default=12];
+  optional sint32   a_sint32 = 7     [default=34];
+  optional sint64   a_sint64 = 8     [default=-56];
+  optional fixed32  a_fixed32 = 9    [default=78];
+  optional fixed64  a_fixed64 = 10   [default=90];
+  optional sfixed32 a_sfixed32 = 11  [default=123];
+  optional sfixed64 a_sfixed64 = 12  [default=-456];
+  optional bool     a_bool = 13      [default=false];
+  optional string   a_string = 14    [default="abc\"\'@<<>>\n"];
+  optional bytes    a_bytes = 15     [default="abc\"\'@<<>>\n"];
+
+  optional TopLevelEnum top_level_enum = 16 [default=apple];
+}

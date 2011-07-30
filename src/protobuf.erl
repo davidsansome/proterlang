@@ -198,32 +198,39 @@ zigzag_encode(Value) when Value < 0 ->
   ((- Value) bsl 1) - 1.
 
 
-% Encodes a record value into a binary, taking account of the field type.
-encode_field(undefined, FieldNumber, MessageDefinition) ->
-  % Get the field definition.  This will always exist.
-  Definition = lists:keyfind(FieldNumber, #field_definition.number,
-    MessageDefinition#message_definition.fields),
-
-  % If this field was required then raise an error.
-  case Definition#field_definition.label of
-    required -> erlang:error(missing_required_field, [
-      MessageDefinition#message_definition.name,
-      FieldNumber,
-      Definition#field_definition.name]);
-    _ -> << >>
-  end;
-
 encode_field(Value, FieldNumber, MessageDefinition) ->
   % Get the field definition.  This will always exist.
   Definition = lists:keyfind(FieldNumber, #field_definition.number,
     MessageDefinition#message_definition.fields),
 
-  Type = Definition#field_definition.type,
-  WireType = wire_type(Type),
-  Key = encode_key(WireType, FieldNumber),
-  EncodedValue = encode_item(WireType, encode_item_value(Value, Definition)),
+  DefaultValue = Definition#field_definition.default_value,
 
-  << (encode_varint(Key))/binary, EncodedValue/binary >>.
+  case Value of
+    undefined ->
+      % If this field was required then raise an error.
+      case Definition#field_definition.label of
+        required ->
+          erlang:error(missing_required_field, [
+            MessageDefinition#message_definition.name,
+            FieldNumber,
+            Definition#field_definition.name
+          ]);
+        _ -> << >>
+      end;
+
+    DefaultValue ->
+      % The value is the same as the default value for this field, so don't
+      % bother encoding anything.
+      << >>;
+
+    _ ->
+      Type = Definition#field_definition.type,
+      WireType = wire_type(Type),
+      Key = encode_key(WireType, FieldNumber),
+      EncodedValue = encode_item(WireType, encode_item_value(Value, Definition)),
+
+      << (encode_varint(Key))/binary, EncodedValue/binary >>
+  end.
 
 
 encode_item_value(Value, #field_definition{type = int32} = Def) ->
@@ -275,8 +282,6 @@ decode_file(Filename, Module, Function) ->
 
 
 % Finds a field with the given field number in the list of decoded items.
-% If the field wasn't found in the list if items and the definition says it was
-% required, raises an exception, otherwise returns the default field value.
 find_field(Items, FieldNumber, MessageDefinition) ->
   % Get the field definition.  This will always exist.
   Definition = lists:keyfind(FieldNumber, #field_definition.number,
@@ -286,11 +291,7 @@ find_field(Items, FieldNumber, MessageDefinition) ->
   Item = lists:keyfind(FieldNumber, 1, Items),
   case Item of
     false ->
-      % The value wasn't found in the message - use the default value.
-      case Definition#field_definition.label of
-        required -> undefined;
-        _        -> Definition#field_definition.default_value
-      end;
+      Definition#field_definition.default_value;
 
     {FieldNumber, Value} ->
       Value

@@ -5,6 +5,7 @@
 #include <google/protobuf/io/zero_copy_stream.h>
 
 #include <sstream>
+#include <stdio.h>
 
 using namespace google::protobuf;
 using namespace google::protobuf::compiler;
@@ -36,7 +37,8 @@ inline void UpperString(string* s) {
   }
 }
 
-inline string SimpleItoa(int value) {
+template <typename T>
+inline string ToString(T value) {
   std::stringstream out;
   out << value;
   return out.str();
@@ -48,6 +50,59 @@ inline void ReplaceChar(char from, char to, string* s) {
       *it = to;
     }
   }
+}
+
+int CEscapeInternal(const char* src, int src_len, char* dest,
+                    int dest_len, bool use_hex, bool utf8_safe) {
+  const char* src_end = src + src_len;
+  int used = 0;
+  bool last_hex_escape = false; // true if last output char was \xNN
+
+  for (; src < src_end; src++) {
+    if (dest_len - used < 2)   // Need space for two letter escape
+      return -1;
+
+    bool is_hex_escape = false;
+    switch (*src) {
+      case '\n': dest[used++] = '\\'; dest[used++] = 'n';  break;
+      case '\r': dest[used++] = '\\'; dest[used++] = 'r';  break;
+      case '\t': dest[used++] = '\\'; dest[used++] = 't';  break;
+      case '\"': dest[used++] = '\\'; dest[used++] = '\"'; break;
+      case '\'': dest[used++] = '\\'; dest[used++] = '\''; break;
+      case '\\': dest[used++] = '\\'; dest[used++] = '\\'; break;
+      default:
+        // Note that if we emit \xNN and the src character after that is a hex
+        // digit then that digit must be escaped too to prevent it being
+        // interpreted as part of the character code by C.
+        if ((!utf8_safe || static_cast<uint8>(*src) < 0x80) &&
+            (!isprint(*src) ||
+             (last_hex_escape && isxdigit(*src)))) {
+          if (dest_len - used < 4) // need space for 4 letter escape
+            return -1;
+          sprintf(dest + used, (use_hex ? "\\x%02x" : "\\%03o"),
+                  static_cast<uint8>(*src));
+          is_hex_escape = use_hex;
+          used += 4;
+        } else {
+          dest[used++] = *src; break;
+        }
+    }
+    last_hex_escape = is_hex_escape;
+  }
+
+  if (dest_len - used < 1)   // make sure that there is room for \0
+    return -1;
+
+  dest[used] = '\0';   // doesn't count towards return value though
+  return used;
+}
+
+string CEscape(const string& src) {
+  const int dest_length = src.size() * 4 + 1; // Maximum possible expansion
+  scoped_array<char> dest(new char[dest_length]);
+  const int len = CEscapeInternal(src.data(), src.size(),
+                                  dest.get(), dest_length, false, false);
+  return string(dest.get(), len);
 }
 
 
@@ -178,7 +233,7 @@ void ErlangGenerator::GenerateEnum(const EnumDescriptor* des,
 
     const EnumValueDescriptor* value = des->value(i);
     variables["valuename"] = value->name();
-    variables["valuenumber"] = SimpleItoa(value->number());
+    variables["valuenumber"] = ToString(value->number());
 
     hrl->Print(variables, "  {'$valuename$', $valuenumber$}");
   }
@@ -203,7 +258,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   UpperString(&messagename_upper);
 
   map<string, string> variables;
-  variables["name"] = message->name();
+  variables["name"] = message->full_name();
   variables["messagename"] = messagename;
   variables["messagename_upper"] = messagename_upper;
 
@@ -215,8 +270,14 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     if (i != 0) {
       hrl->Print(",\n");
     }
-    variables["field_name"] = message->field(i)->name();
-    hrl->Print(variables, "  '$field_name$'");
+
+    const FieldDescriptor* field = message->field(i);
+
+    variables["field_name"] = field->name();
+    variables["default_assignment"] = FieldDefaultValue(field) == "undefined" ?
+          "" : " = " + FieldDefaultValue(field);
+
+    hrl->Print(variables, "  '$field_name$'$default_assignment$");
   }
 
   // Finish the record type
@@ -225,7 +286,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
   // Start the definition
   hrl->Print(variables,
              "-define($messagename_upper$_DEFINITION, #message_definition{\n"
-             "  name = \"$name$\",\n"
+             "  name = <<\"$name$\">>,\n"
              "  fields = [\n");
 
   // Output each field into the definition
@@ -238,9 +299,10 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
 
     variables["field_name"] = field->name();
     variables["field_type"] = FieldTypeAtom(field);
-    variables["field_number"] = SimpleItoa(field->number());
+    variables["field_number"] = ToString(field->number());
     variables["label_atom"] = FieldLabelAtom(field);
     variables["nested_type"] = FieldNestedTypeTuple(field);
+    variables["default_value"] = FieldDefaultValue(field);
     variables["enum_functions"] = FieldEnumFunctionsTuple(field);
 
     hrl->Print(variables,
@@ -250,6 +312,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
         "      number = $field_number$,\n"
         "      label = '$label_atom$',\n"
         "      nested_type = $nested_type$,\n"
+        "      default_value = $default_value$,\n"
         "      enum_functions = $enum_functions$\n"
         "    }");
   }
@@ -273,7 +336,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     const FieldDescriptor* field = message->field(i);
 
     variables["field_name"] = field->name();
-    variables["field_number"] = SimpleItoa(field->number());
+    variables["field_number"] = ToString(field->number());
 
     erl->Print(variables,
         "    '$field_name$' = protobuf:find_field("
@@ -297,7 +360,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
     const FieldDescriptor* field = message->field(i);
 
     variables["field_name"] = field->name();
-    variables["field_number"] = SimpleItoa(field->number());
+    variables["field_number"] = ToString(field->number());
 
     erl->Print(variables,
         "(protobuf:encode_field(Record#$messagename$.$field_name$, "
@@ -356,10 +419,41 @@ string ErlangGenerator::FieldNestedTypeTuple(const FieldDescriptor* field) const
     return "undefined";
   }
 
-  string module   = ErlangFilename(field->message_type()->file());
+  string module = ErlangFilename(field->message_type()->file());
   string decode = "decode_" + ErlangThingName(field->message_type());
   string encode = "encode_" + ErlangThingName(field->message_type());
   return "{'" + module + "', '" + decode + "', '" + encode + "'}";
+}
+
+string ErlangGenerator::FieldDefaultValue(const FieldDescriptor* field) const {
+  if (!field->has_default_value()) {
+    return "undefined";
+  }
+
+  switch (field->cpp_type()) {
+    case FieldDescriptor::CPPTYPE_BOOL:
+      return field->default_value_bool() ? "true" : "false";
+    case FieldDescriptor::CPPTYPE_INT32:
+      return ToString(field->default_value_int32());
+    case FieldDescriptor::CPPTYPE_INT64:
+      return ToString(field->default_value_int64());
+    case FieldDescriptor::CPPTYPE_UINT32:
+      return ToString(field->default_value_uint32());
+    case FieldDescriptor::CPPTYPE_UINT64:
+      return ToString(field->default_value_uint64());
+    case FieldDescriptor::CPPTYPE_FLOAT:
+      return ToString(field->default_value_float());
+    case FieldDescriptor::CPPTYPE_DOUBLE:
+      return ToString(field->default_value_double());
+    case FieldDescriptor::CPPTYPE_STRING:
+      return "<<\"" + CEscape(field->default_value_string()) + "\">>";
+    case FieldDescriptor::CPPTYPE_ENUM:
+      return "'" + field->default_value_enum()->name() + "'";
+    default:
+      break;
+  }
+
+  return "undefined";
 }
 
 string ErlangGenerator::FieldEnumFunctionsTuple(const FieldDescriptor* field) const {

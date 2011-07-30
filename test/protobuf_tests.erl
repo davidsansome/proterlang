@@ -133,15 +133,15 @@ encode_string_test() ->
   ?assertEqual(<<3:8, 16#e6, 16#9c, 16#ac>>, encode("本", Definition)).
 
 
-fuzzy_compare(A, B) ->
+fuzzy_compare(A, B) when is_float(A), is_float(B) ->
   ?assert(abs(A - B) < 0.00001).
 
-encode_and_decode(Test, Msg) ->
-  Rec = testmessages:decode_testmessage_pb(Msg),
+encode_and_decode(Test, Msg, EncodeFunc, DecodeFunc) ->
+  Rec = testmessages:DecodeFunc(Msg),
   Test(Rec),
 
-  Msg2 = testmessages:encode_testmessage_pb(Rec),
-  Rec2 = testmessages:decode_testmessage_pb(Msg2),
+  Msg2 = testmessages:EncodeFunc(Rec),
+  Rec2 = testmessages:DecodeFunc(Msg2),
   Test(Rec2).
 
 
@@ -171,7 +171,7 @@ decode_simple_message_test() ->
           (16#7b30c803385440a8014d7b00000051c801000000000000):23/integer-unit:8,
           (16#5d150300006140e20100000000006801720b68656c6c6f):23/integer-unit:8,
           (16#20776f726c647a0100):9/integer-unit:8>>,
-  encode_and_decode(Test, Msg).
+  encode_and_decode(Test, Msg, encode_testmessage_pb, decode_testmessage_pb).
 
 
 decode_negative_message_test() ->
@@ -190,7 +190,7 @@ decode_negative_message_test() ->
   Msg = <<(16#09f6285c8fc23545c01514ae29c218aef6ffffffffffff):23/integer-unit:8,
           (16#ff0120aef6ffffffffffffff0138a31340a3135d2efbff):23/integer-unit:8,
           (16#ff612efbffffffffffff6800):12/integer-unit:8>>,
-  encode_and_decode(Test, Msg).
+  encode_and_decode(Test, Msg, encode_testmessage_pb, decode_testmessage_pb).
 
 
 decode_enum_message_test() ->
@@ -200,7 +200,7 @@ decode_enum_message_test() ->
   end,
 
   Msg = <<(16#800101880102):6/integer-unit:8>>,
-  encode_and_decode(Test, Msg).
+  encode_and_decode(Test, Msg, encode_testmessage_pb, decode_testmessage_pb).
 
 
 decode_nested_message_test() ->
@@ -216,4 +216,26 @@ decode_nested_message_test() ->
   end,
 
   Msg = <<(16#9201020a00):5/integer-unit:8>>,
-  encode_and_decode(Test, Msg).
+  encode_and_decode(Test, Msg, encode_testmessage_pb, decode_testmessage_pb).
+
+
+decode_default_message_test() ->
+  Test = fun(Rec) ->
+    fuzzy_compare(1.2, Rec#defaultvaluesmessage_pb.a_double),
+    fuzzy_compare(3.4, Rec#defaultvaluesmessage_pb.a_float),
+    ?assertEqual(-56, Rec#defaultvaluesmessage_pb.a_int32),
+    ?assertEqual(78, Rec#defaultvaluesmessage_pb.a_int64),
+    ?assertEqual(90, Rec#defaultvaluesmessage_pb.a_uint32),
+    ?assertEqual(12, Rec#defaultvaluesmessage_pb.a_uint64),
+    ?assertEqual(34, Rec#defaultvaluesmessage_pb.a_sint32),
+    ?assertEqual(-56, Rec#defaultvaluesmessage_pb.a_sint64),
+    ?assertEqual(78, Rec#defaultvaluesmessage_pb.a_fixed32),
+    ?assertEqual(90, Rec#defaultvaluesmessage_pb.a_fixed64),
+    ?assertEqual(123, Rec#defaultvaluesmessage_pb.a_sfixed32),
+    ?assertEqual(-456, Rec#defaultvaluesmessage_pb.a_sfixed64),
+    ?assertEqual(false, Rec#defaultvaluesmessage_pb.a_bool),
+    ?assertEqual(<<"abc\"\'@<<>>\n">>, Rec#defaultvaluesmessage_pb.a_string),
+    ?assertEqual(<<"abc\"\'@<<>>\n">>, Rec#defaultvaluesmessage_pb.a_bytes)
+  end,
+
+  encode_and_decode(Test, <<>>, encode_defaultvaluesmessage_pb, decode_defaultvaluesmessage_pb).
