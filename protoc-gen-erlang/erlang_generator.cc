@@ -260,7 +260,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
 
   // Output the decoding function
   erl->Print(variables,
-      "decode_$messagename$(Binary) ->\n"
+      "decode_$messagename$(Binary) when is_binary(Binary) ->\n"
       "  Items = protobuf:decode_items(Binary, ?$messagename_upper$_DEFINITION),\n"
       "  #$messagename${\n"
       );
@@ -286,7 +286,7 @@ void ErlangGenerator::GenerateMessage(const Descriptor* message,
 
   // Output the encoding function
   erl->Print(variables,
-      "encode_$messagename$(Record) ->\n"
+      "encode_$messagename$(Record) when is_record(Record, $messagename$) ->\n"
       "  << ");
 
   for (int i=0 ; i<message->field_count() ; ++i) {

@@ -10,6 +10,9 @@
 % Interface used by generated code.
 -export([decode_items/2, find_field/3, encode_field/3, enum_name/2, enum_value/2]).
 
+% Other functions are exported to be used by unit tests.
+-export([encode_key/2, decode_key/1, encode_item_value/2, wire_type/1, encode_item/2]).
+
 
 % Decodes a varint from the Binary and returns a {Integer, Tail} tuple where
 % Tail is the remainder of Binary after the varint.
@@ -53,7 +56,7 @@ decode_key(Key) ->
 
 
 % Encodes a WireType and FieldNumber into a Key to go in the field header.
-encode_key(WireType, FieldNumber) ->
+encode_key(WireType, FieldNumber) when WireType >= 0, WireType =< 7 ->
   (FieldNumber bsl 3) bor WireType.
 
 
@@ -83,14 +86,14 @@ wire_type('float')  -> 5.
 decode_item(0, Binary) ->
   decode_varint(Binary);
 decode_item(1, Binary) ->
-  << Value:64/float-little, Tail/binary >> = Binary,
+  << Value:64/unsigned-integer-little, Tail/binary >> = Binary,
   {Value, Tail};
 decode_item(2, Binary) ->
   {Length, Tail1} = decode_varint(Binary),
   << String:Length/binary, Tail2/binary >> = Tail1,
   {String, Tail2};
 decode_item(5, Binary) ->
-  << Value:32/float-little, Tail/binary >> = Binary,
+  << Value:32/unsigned-integer-little, Tail/binary >> = Binary,
   {Value, Tail}.
 
 
@@ -98,13 +101,13 @@ decode_item(5, Binary) ->
 encode_item(0, Value) ->
   encode_varint(Value);
 encode_item(1, Value) ->
-  << Value:64/float-little >>;
+  << Value:64/unsigned-integer-little >>;
 encode_item(2, Value) when is_list(Value) ->
   encode_item(2, list_to_binary(Value));
 encode_item(2, Value) when is_binary(Value) ->
   << (encode_varint(size(Value)))/binary, Value/binary >>;
 encode_item(5, Value) ->
-  << Value:32/float-little >>.
+  << Value:32/unsigned-integer-little >>.
 
 
 % Decodes encoded protobuf fields from a binary.  Returns a list of
@@ -156,10 +159,8 @@ decode_item_value(Value, #field_definition{type = uint64}) ->
   Value;
 decode_item_value(Value, #field_definition{type = sint32} = Def) ->
   decode_item_value(Value, Def#field_definition{type = sint64});
-decode_item_value(Value, #field_definition{type = sint64}) when Value band 1 == 0 ->
-  Value bsr 1;
-decode_item_value(Value, #field_definition{type = sint64}) when Value band 1 == 1 ->
-  - ((Value + 1) bsr 1);
+decode_item_value(Value, #field_definition{type = sint64}) ->
+  zigzag_decode(Value);
 decode_item_value(0, #field_definition{type = bool}) ->
   false;
 decode_item_value(_, #field_definition{type = bool}) ->
@@ -170,19 +171,57 @@ decode_item_value(Value, #field_definition{type = message,
 decode_item_value(Value, #field_definition{type = enum,
                                            enum_functions = {Module, V2N, _}}) ->
   Module:V2N(Value);
+decode_item_value(Value, #field_definition{type = double}) ->
+  <<Ret:64/float>> = <<Value:64>>,
+  Ret;
+decode_item_value(Value, #field_definition{type = float}) ->
+  <<Ret:32/float>> = <<Value:32>>,
+  Ret;
+decode_item_value(Value, #field_definition{type = sfixed32}) ->
+  <<Ret:32/signed-integer>> = <<Value:32>>,
+  Ret;
+decode_item_value(Value, #field_definition{type = sfixed64}) ->
+  <<Ret:64/signed-integer>> = <<Value:64>>,
+  Ret;
 decode_item_value(Value, _) ->
   Value.
 
 
+zigzag_decode(Value) when Value band 1 == 0 ->
+  Value bsr 1;
+zigzag_decode(Value) when Value band 1 == 1 ->
+  - ((Value + 1) bsr 1).
+
+zigzag_encode(Value) when Value >= 0 ->
+  Value bsl 1;
+zigzag_encode(Value) when Value < 0 ->
+  ((- Value) bsl 1) - 1.
+
+
 % Encodes a record value into a binary, taking account of the field type.
+encode_field(undefined, FieldNumber, MessageDefinition) ->
+  % Get the field definition.  This will always exist.
+  Definition = lists:keyfind(FieldNumber, #field_definition.number,
+    MessageDefinition#message_definition.fields),
+
+  % If this field was required then raise an error.
+  case Definition#field_definition.label of
+    required -> erlang:error(missing_required_field, [
+      MessageDefinition#message_definition.name,
+      FieldNumber,
+      Definition#field_definition.name]);
+    _ -> << >>
+  end;
+
 encode_field(Value, FieldNumber, MessageDefinition) ->
   % Get the field definition.  This will always exist.
   Definition = lists:keyfind(FieldNumber, #field_definition.number,
     MessageDefinition#message_definition.fields),
 
   Type = Definition#field_definition.type,
-  Key = encode_key(wire_type(Type), FieldNumber),
-  EncodedValue = encode_item_value(Value, Definition),
+  WireType = wire_type(Type),
+  Key = encode_key(WireType, FieldNumber),
+  EncodedValue = encode_item(WireType, encode_item_value(Value, Definition)),
 
   << (encode_varint(Key))/binary, EncodedValue/binary >>.
 
@@ -191,33 +230,37 @@ encode_item_value(Value, #field_definition{type = int32} = Def) ->
   encode_item_value(Value, Def#field_definition{type = int64});
 encode_item_value(Value, #field_definition{type = int64}) ->
   <<Value2:64/integer-unsigned>> = <<Value:64/integer-unsigned>>,
-  encode_varint(Value2);
+  Value2;
 encode_item_value(Value, #field_definition{type = uint32} = Def) ->
   encode_item_value(Value, Def#field_definition{type = uint64});
 encode_item_value(Value, #field_definition{type = uint64}) when Value >= 0 ->
-  encode_varint(Value);
+  Value;
 encode_item_value(Value, #field_definition{type = sint32} = Def) ->
   encode_item_value(Value, Def#field_definition{type = sint64});
-encode_item_value(Value, #field_definition{type = sint64}) when Value >= 0 ->
-  encode_varint(Value bsl 1);
 encode_item_value(Value, #field_definition{type = sint64}) ->
-  encode_varint(((- Value) bsl 1) - 1);
+  zigzag_encode(Value);
 encode_item_value(0, #field_definition{type = bool}) ->
-  encode_varint(0);
+  0;
 encode_item_value(false, #field_definition{type = bool}) ->
-  encode_varint(0);
+  0;
 encode_item_value(_, #field_definition{type = bool}) ->
-  encode_varint(1);
+  1;
 encode_item_value(Value, #field_definition{type = enum}) when is_integer(Value) ->
-  encode_varint(Value);
+  Value;
 encode_item_value(Name, #field_definition{
     type = enum, enum_functions = {Module, _, N2V}}) when is_atom(Name) ->
-  encode_varint(Module:N2V(Name));
+  Module:N2V(Name);
 encode_item_value(Record, #field_definition{
     type = message, nested_type = {Module, _, Fun}}) when is_tuple(Record) ->
-  encode_item(wire_type(message), Module:Fun(Record));
-encode_item_value(Value, #field_definition{type = Type}) ->
-  encode_item(wire_type(Type), Value).
+  Module:Fun(Record);
+encode_item_value(Value, #field_definition{type = float}) ->
+  <<Ret:32/unsigned-integer-big>> = <<Value:32/float>>,
+  Ret;
+encode_item_value(Value, #field_definition{type = double}) ->
+  <<Ret:64/unsigned-integer-big>> = <<Value:64/float>>,
+  Ret;
+encode_item_value(Value, _) ->
+  Value.
 
 
 % Convenience function that decodes a message from a file.  Module and Function

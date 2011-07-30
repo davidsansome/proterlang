@@ -18,19 +18,21 @@ macro(add_erlang sources_var)
   endforeach(arg)
 endmacro(add_erlang)
 
-macro(compile_erlang)
-  add_library(dummy STATIC ${ARGN})
-  set_target_properties(dummy PROPERTIES LINKER_LANGUAGE C)
+macro(compile_erlang target)
+  add_library(dummy_${target} STATIC ${ARGN})
+  set_target_properties(dummy_${target} PROPERTIES LINKER_LANGUAGE C)
 endmacro(compile_erlang)
 
 add_custom_target(test)
 
-macro(test_erlang module)
+macro(test_erlang target module)
   add_custom_target(test_${module}
     COMMAND erl -pa ${CMAKE_CURRENT_BINARY_DIR}
                 -run ${module} test
                 -run init stop
                 -noshell
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${module}.beam
   )
   add_dependencies(test test_${module})
+  add_dependencies(test_${module} dummy_${target})
 endmacro(test_erlang)
