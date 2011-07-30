@@ -201,3 +201,19 @@ decode_enum_message_test() ->
 
   Msg = <<(16#800101880102):6/integer-unit:8>>,
   encode_and_decode(Test, Msg).
+
+
+decode_nested_message_test() ->
+  Test = fun(Rec) ->
+    Nested1 = Rec#testmessage_pb.nested_message,
+    ?assert(is_record(Nested1, testmessage_nestedmessage_pb)),
+
+    Nested2 = Nested1#testmessage_nestedmessage_pb.deeper,
+    ?assert(is_record(Nested2, testmessage_nestedmessage_pb)),
+
+    Nested3 = Nested2#testmessage_nestedmessage_pb.deeper,
+    ?assertEqual(undefined, Nested3)
+  end,
+
+  Msg = <<(16#9201020a00):5/integer-unit:8>>,
+  encode_and_decode(Test, Msg).
