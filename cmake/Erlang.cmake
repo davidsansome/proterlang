@@ -9,6 +9,8 @@ macro(add_erlang sources_var)
     add_custom_command(
       OUTPUT ${beam}
       COMMAND ${ERLANG_COMPILE}
+        -I ${CMAKE_BINARY_DIR}/src
+        -I ${CMAKE_SOURCE_DIR}/src
         -o ${CMAKE_CURRENT_BINARY_DIR}/
         ${abspath}
       DEPENDS ${arg}
@@ -25,14 +27,14 @@ endmacro(compile_erlang)
 
 add_custom_target(test)
 
-macro(test_erlang target module)
+macro(test_erlang module)
   add_custom_target(test_${module}
     COMMAND erl -pa ${CMAKE_CURRENT_BINARY_DIR}
+                -pa ${CMAKE_BINARY_DIR}/src
                 -run ${module} test
                 -run init stop
                 -noshell
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${module}.beam
   )
   add_dependencies(test test_${module})
-  add_dependencies(test_${module} dummy_${target})
 endmacro(test_erlang)

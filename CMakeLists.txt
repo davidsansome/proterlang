@@ -8,4 +8,5 @@ find_program(PROTOC_PROGRAM protoc)
 
 add_subdirectory(protoc-gen-erlang)
 add_subdirectory(src)
+add_subdirectory(test)
 
